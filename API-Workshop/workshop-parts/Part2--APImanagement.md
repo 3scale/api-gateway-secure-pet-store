@@ -108,19 +108,16 @@ Our 3scale custom authorizer function will make calls to the 3scale API manageme
 
 If don't have a VPC, create one first and then follow these steps:
 
-1. Go to your AWS console under VPC service.
-2. Create a new subnet
-3. Create a NAT gateway and attach it to the previously created subnet
-4. Create a new route table.
-5. Once the route table is created, edit the routes.
-Point `0.0.0.0/0` to the NAT gateway you created earlier.
+1. Go to your AWS console to the VPC service.
+3. On the navigation pane on the left hand side choose `NAT Gateway` and click the button `Create NAT Gateway`. On the appearing dialog select one of the existing subnets, click the button `Create New EIP` and then `Create a NAT Gateway`.
+4. Go to `Route Tables` in the navigation pane and create a new route table. Then edit the routes to point `0.0.0.0/0` to the NAT gateway you created before.
 ![aws vpc route creation](./img/aws-vpc route table.png)
-6. Attach this rule to at least two subnets in your VPC. For this, select subnets that are not attached to the NAT gateway.
+6. Attach this new route table to at least two subnets in your VPC from the `Subnets` menu in the navigation pane. For this, select subnets that are not attached to the NAT gateway. Take a note of the IDs of these two subnets, you will need them later.
 ![aws vpc attach route table](./img/aws - subnet route table.png)
-7. Select the route table you just created on the route tables tab.
+7. Select the route table you just created on for each subnet in the `Route Table` tab.
 
 And that's it for the VPC part.
-You know have a VPC, that's know connected to the Internet. We will see later how to put Elasticache and Lambda on this VPC.
+You now have a VPC, that's connected to the Internet. We will see later how to put Elasticache and Lambda on this VPC.
 
 
 <a name="elasticache"></a>
@@ -140,8 +137,7 @@ Follow these steps:
 
 There is no more setup to do on the Elasticache cluster.
 
-Once the cluster is ready, go on the node
-created, and get the Endpoint URL. We will need it later on in the tutorial.
+Once the cluster is ready, go on the node created (in the `Nodes` column), and get the Endpoint URL. We will need it later on in the tutorial.
 
 <a name="lambda"></a>
 ## 5) Creating Lambda code for the custom authorizer
@@ -163,7 +159,7 @@ Follow these steps to get the Lambda function that represents the 3scale custom 
 
 Before deploying this to AWS we need to complete a few more tasks.
 
-1. Init serverless project with 
+1. Init serverless project in your project's root folder with 
 
 ```
 npm install
@@ -171,13 +167,12 @@ sls project init
 ```
 
 ![](./img/sls_project_init.png)
-
-2. In `awsThreeScale_Authorizer` folder and on each function folder run the `npm install` command. This will install all the NPM plugins needed.
+2. In addition run the `npm install` command on each function folder, i.e. in `authrepAsync` and `authorizer`. This will install all the NPM plugins needed.
 
 The logic of each Lambda function is kept in the `handler.js` file but we don't have to touch it. If you look at the code in this file you will see that we are using environment variables. So, let's set them up:
 
 1. Go to the `authorizer` folder
-2. Open the `s-function_example.js` file and rename it to `s-function.js`
+2. Open the `s-function_example.json` file and rename it to `s-function.json`
 3. Modify the placeholder with your own values under `environment` section.
 
 ```
@@ -203,9 +198,9 @@ You can find `YOUR_3SCALE_SERVICE_ID` under the `APIs` tab.
 For the `YOUR_ELASTICACHE_ENDPOINT`, go on your AWS console and click on the cluster you have created before. There you will see the endpoint URL.
 
 ![aws elasticache](./img/aws_elasticache_endpoint.png)
-
 3. In the `s-function.json` file for `authorizer` function you will see a `SNS_TOPIC_ARN` property. Leave it like it is for now, we will come back to it later.
-4. In the `s-function.json` you have a `vpc` section, too. Replace it with the security group and the subnets we have created before. The VPC section should look like this now:
+4. In the `s-function.json` you have a `vpc` section, too. Add your Security Group ID, which you can find in the `VPC` service in the navigation pane on the left under the `Security Groups` menu. 
+5. Then add the Subnet IDs of the subnets which are connected to the NAT gateway as configured in section 3 [above](#vpc). You can find the Subnet IDs in the same navigation pane under `Subnets` menu. The VPC section should look like this now:
 
 	```
 	"vpc": {
@@ -215,9 +210,10 @@ For the `YOUR_ELASTICACHE_ENDPOINT`, go on your AWS console and click on the clu
 	```
 This part of the configuration assigns a VPC to the Lambda function, so it can communicate with Elasticache.
 
-Repeat those steps on `authrepSync` folder too.
 
-We are now done with the settings of our Lambda functions that represent the 3scale custom authorizer.
+Repeat the same steps for the `s-function.json` file in the `authrepSync` folder too.
+
+We are now done with the settings for our Lambda functions that represent the 3scale custom authorizer.
 
 Now finally, let's deploy these two Lambda functions using Serverless again:
 
@@ -227,7 +223,7 @@ Next, select both functions and then select deploy.
 
 ![](./img/sls_dash_deploy_functions.png)
 
-<a name="authorizer"></a>
+<a name="deploy"></a>
 ## 6) Add 3scale custom authorizer to Amazon API Gateway
 We are now going to add the custom authorizer functions we just deployed to our existing API on the Amazon API Gateway.
 
@@ -239,7 +235,7 @@ To do so follow these steps:
 4. Name it `threescale`.
 ![](./img/aws_new_authorizer.png)
 5. Choose the region where your Lambda has been deployed
-6. Look for and choose the authorizer function you have deployed earlier. (`sls-threeScale-Authorizer-authorizer`)
+6. For the `Lambda function` field, look for and choose the authorizer function you have deployed earlier. (Just start typing and it should appear: `sls-threeScale-Authorizer-authorizer`)
 7. Under `Identify token source` modify it to `method.request.header.apikey`. It means that we are expecting developers to make a call to our API with a header `apikey`, and we will use this key to authenticate the request.
 8. Finally change TTL to 0.
 
@@ -251,9 +247,9 @@ Finally, we have to apply it to our API endpoints:
 
 1. Go to the `Resources` part of your API.
 2. Select a method, and click on the `method request` box.
-3. Change `Authorization` to the custom authorizer you have created before.
-4. Finally, save and re-deploy your API.
+3. Change `Authorization` to the `threescale` custom authorizer you have created before and save.
 ![](./img/aws_authorization_settings.png)
+4. Finally, re-deploy your API by clicking on the `Actions` button and then select `Deploy API` at the bottom.
 
 You would have to reproduce these steps on each endpoint of your API to make sure all your API is secured. But for now we can limit it to a single endpoint.
 
