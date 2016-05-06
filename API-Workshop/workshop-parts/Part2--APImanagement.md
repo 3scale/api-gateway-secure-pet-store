@@ -9,15 +9,13 @@
 * 0) Prerequisites for this tutorial ([Jump to section](#prerequisites))
 * 1) Goals of this tutorial ([Jump to section](#goals))
 * 2) (Optional) Create an API and deployed it to Amazon API gateway ([Jump to section](#lambda-api))
-* 3) Setting up the Amazon Virtual Private Cloud (VPC) ([Jump to section](#vpc))
-* 4) Setting up Elasticache ([Jump to section](#elasticache))
-* 5) Creating Lambda code for the custom authorizer ([Jump to section](#lambda))
-* 6) Add 3scale custom authorizer to Amazon API Gateway ([Jump to section](#deploy))
-* 7) Finishing up the integration using Amazon Simple Notification Service ([Jump to section](#sns))
-* 8) Testing the whole flow end-to-end ([Jump to section](#testing))
+* 3) Deploy the stack of AWS services ([Jump to section](#deploy-project))
+* 4) Add 3scale custom authorizer to Amazon API Gateway ([Jump to section](#deploy))
+* 5) Testing the whole flow end-to-end ([Jump to section](#testing))
 * Additional resources
 	* Intro to [3scale](https://www.3scale.net/) API Management ([Jump to section](#intro))
 	* Intro to the Amazon API Gateway [custom authorizer](http://docs.aws.amazon.com/apigateway/latest/developerguide/use-custom-authorizer.html#api-gateway-custom-authorization-overview) principles ([Jump to section](#authorizer))
+	* Async mechanism using SNS ([Jump to section](#sns))
 
 <a name="prerequisites"></a>
 ## 0) Prerequisites for this tutorial
@@ -69,8 +67,6 @@ Here is the flow for every subsequent call:
 5. The 3scale custom authorizer calls the 3scale Async Reporting Function.
 6. The 3scale Async Reporting Function reports the traffic back to the 3scale API Management platform, which is used for API analytics.
 
-
-
 <a name="lambda-api"></a>
 ## 2) (Optional) Create an API and deployed it to Amazon API gateway
 If you don't yet have an API deployed on Amazon API gateway you can create one very easily using the [Serverless](https://github.com/serverless/serverless) framework. `sls` is the Serverless CLI which you should have installed on your system as part of the prerequisites of this tutorial.
@@ -98,54 +94,21 @@ Select both the endpoint and the function.
 If it succeeded it should give you the URL of the API created.
 We will use this API during the rest of our tutorial.
 
-<a name="vpc"></a>
-## 3) Setting up the Amazon Virtual Private Cloud (VPC)
-To reduce latency and have an API stack that is capable of handling the load of thousands of requests, we will use [Amazon Elasticache](https://aws.amazon.com/elasticache/). There we will store API keys that were authorized to make request to the API (see the descriptions and diagrams [above](#goals)). This will help reducing the number of calls to the main 3scale platform and consequently improve the overall API stack performance.
+<a name="deploy-project"></a>
+## 3) Deploy stack
+For this integration we are going to use a lot of different services from the AWS stack.
 
-Elasticache is only available through the [Amazon Virtual Private Cloud](https://aws.amazon.com/vpc/) (VPC). To be able to use Elasticache with Lambda, the Lambda function has to be on the same VPC.
+To simplify the deployment and the linking of this stack we are going to use CloudFormation.
 
-Our 3scale custom authorizer function will make calls to the 3scale API management platform, which is outside of the VPC. We will now configure the VPC to make sure it can connect to the internet, outside of VPC.
+If you are not familiar with CloudFormation, it's an AWS service that let you describe in a JSON file all the AWS services you want to use and link them together. [Read more about cloudformation](http://aws.amazon.com/cloudformation/)
 
-If don't have a VPC, create one first and then follow these steps:
+We also bundled the CloudFormation stack into our Serverless project, so the Lambda functions could also take advantage of CloudFormation.
 
-1. Go to your AWS console to the VPC service.
-3. On the navigation pane on the left hand side choose `NAT Gateway` and click the button `Create NAT Gateway`. On the appearing dialog select one of the existing subnets, click the button `Create New EIP` and then `Create a NAT Gateway`.
-4. Go to `Route Tables` in the navigation pane and create a new route table. Then edit the routes to point `0.0.0.0/0` to the NAT gateway you created before.
-![aws vpc route creation](./img/aws-vpc route table.png)
-6. Attach this new route table to at least two subnets in your VPC from the `Subnets` menu in the navigation pane. For this, select subnets that are not attached to the NAT gateway. Take a note of the IDs of these two subnets, you will need them later.
-![aws vpc attach route table](./img/aws - subnet route table.png)
-7. Select the route table you just created on for each subnet in the `Route Table` tab.
-
-And that's it for the VPC part.
-You now have a VPC, that's connected to the Internet. We will see later how to put Elasticache and Lambda on this VPC.
-
-
-<a name="elasticache"></a>
-## 4) Setting up Elasticache
-
-[Elasticache](https://aws.amazon.com/elasticache/) is a service offered by AWS to cache data simply and access it quickly. It supports both Memcached and Redis. In our example we will use Redis.
-
-Follow these steps:
-
-1. Go to the Elasticache section in your AWS console.
-2. Create a Redis cluster under the VPC you defined before.
-3. Uncheck the replication box.
-4. Change Node type to `cache.t2.micro`  (eligible for free tier).
-![aws elasticache config](./img/aws_elasticache_config.png)
-5. On the next step, select your VPC and launch the cluster.
-![aws elasticache VPC config](./img/aws_elasticache_config2.png)
-
-There is no more setup to do on the Elasticache cluster.
-
-Once the cluster is ready, go on the node created (in the `Nodes` column), and get the Endpoint URL. We will need it later on in the tutorial.
-
-<a name="lambda"></a>
-## 5) Creating Lambda code for the custom authorizer
-We will now work on the code for the Lambda function that represents the custom authorizer. This Lambda function will call the 3scale API Management platform to check if a call to the API is authorized.
+The Lambda functions will call the 3scale API Management platform to check if a call to the API is authorized.
 
 We are using the Serverless framework, which is a great way to deploy Lambda functions easily. If you are not familiar with it, check their [site](http://serverless.com). It's basically a tool that helps you manage Lambda functions easily.
 
-Follow these steps to get the Lambda function that represents the 3scale custom authorizer up and running:
+Follow these steps to deploy the 3scale stack:
 
 1. Clone [this repo](https://github.com/picsoung/awsThreeScale_Authorizer) locally using the following commands:
 	```
@@ -156,6 +119,8 @@ Follow these steps to get the Lambda function that represents the 3scale custom 
 2. In the `awsThreeScale_Authorizer` folder you will see two different folders, which represent the two Lambda function we are going to use:
     * `authorizer` is the Lambda function that is called by the Amazon API Gateway to authorize incoming API calls (see the [first diagram above](#firstcall)).
     * `authrepAsync` is called by the `authorizer` function to sync with the 3scale API Management platform for API traffic reporting and analytics (see the [second diagram above](#subsequentcalls)).
+    
+To check the CloudFormation settings you can look at `s-ressources-cf.json` file at the root of the project.
 
 Before deploying this to AWS we need to complete a few more tasks.
 
@@ -165,25 +130,25 @@ Before deploying this to AWS we need to complete a few more tasks.
 npm install
 sls project init
 ```
-
 ![](./img/sls_project_init.png)
-2. In addition run the `npm install` command on each function folder, i.e. in `authrepAsync` and `authorizer`. This will install all the NPM plugins needed.
 
-The logic of each Lambda function is kept in the `handler.js` file but we don't have to touch it. If you look at the code in this file you will see that we are using environment variables. So, let's set them up:
+This will install all the npm modules we need to run our functions. And it will setup the serverless project, asking for a stage and a region where to deploy it.
 
-1. Go to the `authorizer` folder
-2. Open the `s-function_example.json` file and rename it to `s-function.json`
-3. Modify the placeholder with your own values under `environment` section.
+2. The logic of each Lambda function is kept in the `handler.js` file but we don't have to touch it. If you look at the code in this file you will see that we are using environment variables. So, let's set them up:
+
+  1. Go to the `authorizer` folder
+  2. Modify the placeholder `YOUR_3SCALE_PROVIDER_KEY` and `YOUR_3SCALE_SERVICE_ID`  with your own values under `environment` section.
 
 ```
 "environment": {
 	"SERVERLESS_PROJECT": "${project}",
 	"SERVERLESS_STAGE": "${stage}",
 	"SERVERLESS_REGION": "${region}",
-	"THREESCALE_PROVIDER_KEY":"YOUR_3SCALE_PROVIDER_KEY",
-	"THREESCALE_SERVICE_ID":"YOUR_3SCALE_SERVICE_ID",
-	"ELASTICACHE_ENDPOINT":"YOUR_ELASTICACHE_ENDPOINT",
-	"ELASTICACHE_PORT":6379
+	"THREESCALE_PROVIDER_KEY": "YOUR_3SCALE_PROVIDER_KEY",
+	"THREESCALE_SERVICE_ID": "YOUR_3SCALE_SERVICE_ID",
+	"ELASTICACHE_ENDPOINT": "${elastiCacheEndpoint}",
+	"ELASTICACHE_PORT": 6379,
+  "SNS_TOPIC_ARN":"${snsTopic}"
 }
 ```
 
@@ -195,36 +160,23 @@ You can find `YOUR_3SCALE_SERVICE_ID` under the `APIs` tab.
 
 ![3scale service_id](./img/3scale_service_id.png)
 
-For the `YOUR_ELASTICACHE_ENDPOINT`, go on your AWS console and click on the cluster you have created before. There you will see the endpoint URL.
+We don't need to change anything in this file. The other environment variables will be populated by Serverless and CloudFormation.
 
-![aws elasticache](./img/aws_elasticache_endpoint.png)
-3. In the `s-function.json` file for `authorizer` function you will see a `SNS_TOPIC_ARN` property. Leave it like it is for now, we will come back to it later.
-4. In the `s-function.json` you have a `vpc` section, too. Add your Security Group ID, which you can find in the `VPC` service in the navigation pane on the left under the `Security Groups` menu. 
-5. Then add the Subnet IDs of the subnets which are connected to the NAT gateway as configured in section 3 [above](#vpc). You can find the Subnet IDs in the same navigation pane under `Subnets` menu. The VPC section should look like this now:
+  3. Repeat the same steps for the `s-function.json` file in the `authrepSync` folder too.
 
-	```
-	"vpc": {
-	   "securityGroupIds": ["ID_OF_SECURITY_GROUP"],
-	   "subnetIds": ["ID_OF_SUBNET","ID_OF_ANOTHER_SUBNET"]
-   }
-	```
-This part of the configuration assigns a VPC to the Lambda function, so it can communicate with Elasticache.
+  4. Finally, redeploy your function and resources:
+```
+	sls resources deploy
+	sls dash deploy
+```
+![SLS deploy resources](./img/sls_dash_deploy_resources.png)
 
+The first command may take a while as it's deploying all the AWS services.
 
-Repeat the same steps for the `s-function.json` file in the `authrepSync` folder too.
-
-We are now done with the settings for our Lambda functions that represent the 3scale custom authorizer.
-
-Now finally, let's deploy these two Lambda functions using Serverless again:
-
-`sls dash deploy`
-
-Next, select both functions and then select deploy.
-
-![](./img/sls_dash_deploy_functions.png)
+If everything went well, you are done with the coding part, you are ready to use 3scale Management tool on your API.
 
 <a name="deploy"></a>
-## 6) Add 3scale custom authorizer to Amazon API Gateway
+## 4) Add 3scale custom authorizer to Amazon API Gateway
 We are now going to add the custom authorizer functions we just deployed to our existing API on the Amazon API Gateway.
 
 To do so follow these steps:
@@ -253,74 +205,8 @@ Finally, we have to apply it to our API endpoints:
 
 You would have to reproduce these steps on each endpoint of your API to make sure all your API is secured. But for now we can limit it to a single endpoint.
 
-<a name="sns"></a>
-## 7) Finishing up the integration using Amazon Simple Notification Service
-The 3scale custom authorizer function will be called every time a request comes in to the Amazon API Gateway. It is inefficient to call the 3scale API Management platform every time to check if a certain API key is authorized or not.
-
-That's where Elasticache comes in handy.
-
-We implemented the logic of our custom authorizer such that the first time we see an API key we will ask 3scale to authorize it. We then store the result in cache so we can serve it next time the same API key is making another call.
-
-In the case of all the subsequent calls we use the `authRepAsync` Lambda function to sync the cache with the 3scale API Management platform.
-
-This `authRepAsync` function is called by the main `authorizer` function using the [Amazon Simple Notification Service](https://aws.amazon.com/sns/) (SNS). SNS is a notifications protocol available on AWS. A Lambda function can subscribe to a specific topic. Every time a message related to this topic is sent, the Lambda function is triggered.
-
-![sns schema](./img/schema_sns.png)
-
-Here is what you need to do to set this up:
-
-##### Step 1: Create a SNS topic
-
-
-1. In your AWS console, go to the SNS service.
-2. Create a new topic and name it `threescaleAsync`.
-3. Once created, click on this new topic.
-4. Click on the `Create subscription` button.
-5. Select `AWS Lambda` as protocol.
-6. Find the `authRepAsync` function in the endpoint menu.
-7. Keep `default` as a version.
-![](./img/aws_sns_subscription.png)
-
-Now, we have our `authRepAsync` Lambda function subscribed to the topic `threescaleAsync`. Finally, copy the ARN of this topic.
-
-![](./img/aws_sns_ARN.png)
-
-##### Step 2:  Attach policy to Lambda function
-To be able to send SNS message to a topic, a Lambda function needs to have the correct policy. You achieve this by adding the policy to the `s-ressources-cf.json` file at the root of your Serverless project:
-Add the following to the `Statement` array of `IamPolicyLambda` object.
-
-```
-{
-	"Effect": "Allow",
-	"Action": [
-		"sns:Publish"
-	],
-	"Resource": [
-		"YOUR_SNS_TOPIC_ARN"
-	]              
-}
-```
-
-Replace `YOUR_SNS_TOPIC_ARN` placeholder with the ARN of the topic we previously created.
-
-##### Step 3:  Send SNS message to this topic
-Now finally let's send a message to this topic to check if it all works:
-
-1. Go back to the repo which you cloned in [part 5](#lambda) to get the two Lambda functions that represent the 3scale custom authorizer. 
-2. In the corresponding folder structure find and open the  `s-function.json` file for the `authorizer` function.
-3. . Find the line `  "SNS_TOPIC_ARN":"YOUR_SNS_TOPIC"`
-and replace `YOUR_SNS_TOPIC` with the ARN of the SNS topic you created in step 1.
-4. If you want you can have a look at the `handler.js` file. We inserted a comment that highlights the section of the code that sends the message to the SNS topic.
-5. Finally, redeploy your function and resources:
-```
-	sls resources deploy
-	sls dash deploy
-```
-
-Caching triggered via SNS works now. To check the output you can take a look at the logs of the `authRepAsync` Lambda function.
-
 <a name="testing"></a>
-## 8) Testing the whole flow end-to-end
+## 5) Testing the whole flow end-to-end
 
 You are almost done!
 
@@ -342,7 +228,6 @@ curl -X http://YOUR_API_GATEWAY_URL/YOURENDPOINT \
 	-H 'apikey: 3SCALE_API_KEY'
 ```
 
-
 If we did it all correctly, then you will see the result of your API call returned.
 
 Now let's try with a non valid Key. Simply replace the API key with any random string. Hit the endpoint again. See? It does not work. The call is not authorized and an error response is returned.
@@ -362,5 +247,20 @@ Your API is now protected and only accessible to people with a valid API key.
 <a name="principles"></a>
 ## Intro to the Amazon API Gateway custom authorizer principles
 With the Amazon API Gateway custom authorizer, you can control access to your APIs using bearer token authentication strategies, such as OAuth or SAML. To do so, you provide and configure a custom authorizer (basically your own Lambda function) for the Amazon API Gateway, which is then used to authorize the client requests for the configured APIs. You can find all the details how to do this in a dedicated Amazon API Gateway [tutorial](http://docs.aws.amazon.com/apigateway/latest/developerguide/use-custom-authorizer.html).
+
+<a name="sns"></a>
+## 5) Details on async calls using Amazon Simple Notification Service
+The 3scale custom authorizer function will be called every time a request comes in to the Amazon API Gateway. It is inefficient to call the 3scale API Management platform every time to check if a certain API key is authorized or not.
+
+That's where Elasticache comes in handy.
+
+We implemented the logic of our custom authorizer such that the first time we see an API key we will ask 3scale to authorize it. We then store the result in cache so we can serve it next time the same API key is making another call.
+
+In the case of all the subsequent calls we use the `authRepAsync` Lambda function to sync the cache with the 3scale API Management platform.
+
+This `authRepAsync` function is called by the main `authorizer` function using the [Amazon Simple Notification Service](https://aws.amazon.com/sns/) (SNS). SNS is a notifications protocol available on AWS. A Lambda function can subscribe to a specific topic. Every time a message related to this topic is sent, the Lambda function is triggered.
+
+![sns schema](./img/schema_sns.png)
+
 
 [Back to workshop overview](../README.md)
