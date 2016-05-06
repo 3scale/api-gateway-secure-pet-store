@@ -249,7 +249,7 @@ Your API is now protected and only accessible to people with a valid API key.
 With the Amazon API Gateway custom authorizer, you can control access to your APIs using bearer token authentication strategies, such as OAuth or SAML. To do so, you provide and configure a custom authorizer (basically your own Lambda function) for the Amazon API Gateway, which is then used to authorize the client requests for the configured APIs. You can find all the details how to do this in a dedicated Amazon API Gateway [tutorial](http://docs.aws.amazon.com/apigateway/latest/developerguide/use-custom-authorizer.html).
 
 <a name="sns"></a>
-## 5) Details on async calls using Amazon Simple Notification Service
+## Async mechanism using Amazon Simple Notification Service
 The 3scale custom authorizer function will be called every time a request comes in to the Amazon API Gateway. It is inefficient to call the 3scale API Management platform every time to check if a certain API key is authorized or not.
 
 That's where Elasticache comes in handy.
